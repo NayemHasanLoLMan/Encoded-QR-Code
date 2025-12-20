@@ -19,6 +19,7 @@ message Contact {
   string linkedin = 3;
   string github = 4;
   string address = 5;
+  string website = 6;
 }
 
 message Job {
@@ -39,6 +40,8 @@ message Project {
   string link = 2;
   string duration = 3;
   string description = 4;
+  string github_url = 5;
+  repeated string technologies = 6;
 }
 
 message Education {
@@ -46,11 +49,13 @@ message Education {
   string degree = 2;
   string year = 3;
   string gpa = 4;
-  string achievements = 5;
+  repeated string achievements = 5;
+  string project_github_url = 6;
 }
 
 message Certification {
   string name = 1;
   string issuer = 2;
   string date = 3;
+  string credential_url = 4;
 }
