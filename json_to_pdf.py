@@ -200,7 +200,7 @@ def create_resume_pdf(json_file, output_file):
 
     # Save
     pdf.output(output_file)
-    print(f"✅ PDF generated successfully: {output_file}")
+    print(f"PDF generated successfully: {output_file}")
 
 if __name__ == "__main__":
-    create_resume_pdf("resume.json", "Hasan_Mahmood_CV_Reconstructed.pdf")
+    create_resume_pdf("resume_parsed.json", "Reconstructed.pdf")

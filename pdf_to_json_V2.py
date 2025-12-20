@@ -3,8 +3,6 @@ import json
 import re
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field, asdict
-from skill_normalizer import normalize_skills
-from repo_matcher import match_projects_with_repos
 
 
 @dataclass
@@ -34,6 +32,7 @@ class Education:
     year: str = ""
     gpa: str = ""
     achievements: List[str] = field(default_factory=list)
+    project_github_url: str = ""  # Added for education project link
 
 
 @dataclass
@@ -92,6 +91,7 @@ class ResumeParser:
         self.debug = debug
         self.data = ResumeData()
         self.raw_text = ""
+        self.links = []  # List of {'page': int, 'text': str, 'url': str}
 
     def log(self, msg):
         if self.debug:
@@ -119,6 +119,25 @@ class ResumeParser:
 
         self.raw_text = "\n".join(lines)
         return lines
+
+    def extract_links(self, pdf_path: str):
+        with pdfplumber.open(pdf_path) as pdf:
+            for page_num, page in enumerate(pdf.pages, 1):
+                if page.annots:
+                    for annot in page.annots:
+                        if 'uri' in annot:
+                            uri = annot['uri']
+                            bbox = (annot['x0'], annot['top'], annot['x1'], annot['bottom'])
+                            cropped = page.crop(bbox)
+                            text = cropped.extract_text()
+                            if text:
+                                text = re.sub(r"\s+", " ", text).strip()
+                                self.links.append({
+                                    'page': page_num,
+                                    'text': text,
+                                    'url': uri
+                                })
+                                self.log(f"Extracted link: text='{text}', url='{uri}'")
 
 
     def clean(self, text: str) -> str:
@@ -203,25 +222,24 @@ class ResumeParser:
 
         self.data.experience = exps
 
-    def parse_projects(self, lines):
-        urls = {
-            u.split("/")[-1].replace("-", " ").lower(): u
-            for u in re.findall(r"https?://github\.com/[\w\-]+/[\w\-]+", self.raw_text)
-        }
-
+    def parse_projects(self, lines, github_links):
         projects = []
         current = None
+        github_index = 0
 
         for line in lines:
             line = self.clean(line)
             if "|" in line and "github" in line.lower():
                 if current:
                     projects.append(current)
-                name, _, date = [p.strip() for p in line.split("|")]
-                current = Project(name=name, duration=date, link="GitHub Repository")
-                for k, v in urls.items():
-                    if k in name.lower():
-                        current.github_url = v
+                parts = [p.strip() for p in line.split("|")]
+                name = parts[0]
+                link_text = parts[1] if len(parts) > 1 else ""
+                duration = parts[2] if len(parts) > 2 else ""
+                current = Project(name=name, link=link_text, duration=duration)
+                if github_index < len(github_links):
+                    current.github_url = github_links[github_index]
+                    github_index += 1
             elif current:
                 current.description += " " + line
 
@@ -230,19 +248,23 @@ class ResumeParser:
 
         self.data.projects = projects
 
-    def parse_education(self, lines):
+    def parse_education(self, lines, github_links):
         edus = []
         current = None
+        # Assuming the education GitHub link is after the projects' links
+        github_index = len(self.data.projects)  # Start from the next index after projects
 
         for line in lines:
             line = self.clean(line)
             if "|" in line and re.search(r"20\d{2}", line):
                 if current:
                     edus.append(current)
-                school, year = [p.strip() for p in line.split("|")]
+                parts = [p.strip() for p in line.split("|")]
+                school = parts[0]
+                year = parts[1] if len(parts) > 1 else ""
                 current = Education(school=school, year=year)
             elif current:
-                # GPA detection (robust)
+                # GPA detection
                 gpa_match = re.search(r'GPA[:\s]*([\d.]+/\d+)', line, re.IGNORECASE)
                 if gpa_match:
                     current.gpa = gpa_match.group(1)
@@ -255,7 +277,7 @@ class ResumeParser:
                         current.achievements.append(ach)
                     continue
 
-                # Degree detection (only once)
+                # Degree detection
                 if not current.degree and any(
                     kw in line.lower()
                     for kw in ["bachelor", "higher secondary", "certificate"]
@@ -263,13 +285,19 @@ class ResumeParser:
                     if "|" in line:
                         parts = [p.strip() for p in line.split("|", 1)]
                         current.degree = parts[0]
-                        current.location = parts[1]
+                        current.location = parts[1] if len(parts) > 1 else ""
                     else:
                         current.degree = line
                     continue
 
-                # Continuation lines → achievements
-                if len(line) > 20:
+                # Handle project achievement with GitHub link
+                if "github repository" in line.lower():
+                    ach = line.replace("| Github Repository", "").strip()
+                    current.achievements.append(ach)
+                    if github_index < len(github_links):
+                        current.project_github_url = github_links[github_index]
+                        github_index += 1
+                elif len(line) > 20:
                     current.achievements.append(line)
 
         if current:
@@ -277,14 +305,14 @@ class ResumeParser:
 
         self.data.education = edus
 
-    def parse_certifications(self, lines):
+    def parse_certifications(self, lines, credential_links):
         certs = []
         i = 0
+        credential_index = 0
 
         while i < len(lines):
             line = self.clean(lines[i])
 
-            # CERT HEADER must contain date
             if "|" in line and re.search(r'(20\d{2}|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)', line):
                 parts = [p.strip() for p in line.split("|")]
                 cert = Certification(
@@ -293,16 +321,14 @@ class ResumeParser:
                     date=parts[2] if len(parts) > 2 else ""
                 )
 
-                # Look ahead for details line
                 if i + 1 < len(lines):
                     nxt = self.clean(lines[i + 1])
                     if "credential" in nxt.lower():
-                        cert.details = (
-                            nxt.replace("Credential", "")
-                            .replace("|", "")
-                            .strip()
-                        )
-                        i += 1  # consume detail line
+                        cert.details = nxt.replace("Credential", "").replace("|", "").strip()
+                        if credential_index < len(credential_links):
+                            cert.credential_url = credential_links[credential_index]
+                            credential_index += 1
+                        i += 1
 
                 certs.append(cert)
 
@@ -316,7 +342,12 @@ class ResumeParser:
 
     def parse(self, pdf_path: str) -> Dict[str, Any]:
         lines = self.extract_text(pdf_path)
+        self.extract_links(pdf_path)  # Extract embedded links
         self.parse_header(lines)
+
+        # Filter specific links
+        github_links = [link['url'] for link in self.links if 'github.com' in link['url'].lower() and 'repository' in link['text'].lower()]
+        credential_links = [link['url'] for link in self.links if 'credential' in link['text'].lower()]
 
         current_section = None
         buffer = []
@@ -325,7 +356,7 @@ class ResumeParser:
             sec = self.identify_section(line)
             if sec:
                 if current_section:
-                    self.dispatch(current_section, buffer)
+                    self.dispatch(current_section, buffer, github_links, credential_links)
                 current_section = sec
                 buffer = []
             else:
@@ -333,11 +364,11 @@ class ResumeParser:
                     buffer.append(line)
 
         if current_section:
-            self.dispatch(current_section, buffer)
+            self.dispatch(current_section, buffer, github_links, credential_links)
 
         return self.to_dict()
 
-    def dispatch(self, section, lines):
+    def dispatch(self, section, lines, github_links, credential_links):
         if section == "summary":
             self.parse_summary(lines)
         elif section == "skills":
@@ -345,11 +376,11 @@ class ResumeParser:
         elif section == "experience":
             self.parse_experience(lines)
         elif section == "projects":
-            self.parse_projects(lines)
+            self.parse_projects(lines, github_links)
         elif section == "education":
-            self.parse_education(lines)
+            self.parse_education(lines, github_links)
         elif section == "certifications":
-            self.parse_certifications(lines)
+            self.parse_certifications(lines, credential_links)
         elif section == "languages":
             self.parse_languages(lines)
 
@@ -372,23 +403,7 @@ if __name__ == "__main__":
     parser = ResumeParser(debug=True)
     data = parser.parse("Hasan_Mahmood_Resume.pdf")
 
-    with open("resume_parsed.json", "w", encoding="utf-8") as f:
+    with open("resume_parsed_V2.json", "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
     print("Resume parsed successfully")
-
-    # data = parser.parse("Hasan_Mahmood_Resume.pdf")
-
-    # if data.get("skills"):
-    #     data["skills"] = normalize_skills(data["skills"])
-
-    # if data.get("projects"):
-    #     data["projects"] = match_projects_with_repos(
-    #         data["projects"],
-    #         parser.raw_text
-    #     )
-
-    # with open("resume_parsed.json", "w", encoding="utf-8") as f:
-    #     json.dump(data, f, indent=2, ensure_ascii=False)
-
-    # print("Resume parsed successfully")
