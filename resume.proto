@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+message Resume {
+  string name = 1;
+  string title = 2;
+  Contact contact = 3;
+  string summary = 4;
+  repeated Job experience = 5;
+  repeated SkillCategory skills = 6;
+  repeated Project projects = 7;
+  repeated Education education = 8;
+  repeated Certification certifications = 9;
+  repeated string languages = 10;
+}
+
+message Contact {
+  string phone = 1;
+  string email = 2;
+  string linkedin = 3;
+  string github = 4;
+  string address = 5;
+}
+
+message Job {
+  string company = 1;
+  string role = 2;
+  string duration = 3;
+  string location = 4;
+  repeated string details = 5;
+}
+
+message SkillCategory {
+  string category = 1;
+  repeated string items = 2;
+}
+
+message Project {
+  string name = 1;
+  string link = 2;
+  string duration = 3;
+  string description = 4;
+}
+
+message Education {
+  string school = 1;
+  string degree = 2;
+  string year = 3;
+  string gpa = 4;
+  string achievements = 5;
+}
+
+message Certification {
+  string name = 1;
+  string issuer = 2;
+  string date = 3;
+}
