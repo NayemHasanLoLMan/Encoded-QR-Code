@@ -379,7 +379,8 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 **Built for the professional community**
 
-⭐ Star this repository if you find it helpful!
+Star this repository if you find it helpful!
 
 </div>﻿# Encoded-QR-Code
+
 
