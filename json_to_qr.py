@@ -1,65 +1,3 @@
-# import json
-# import resume_pb2
-# import qrcode
-# import zlib
-# import base64
-# from google.protobuf.json_format import ParseDict
-
-# def generate_qr_from_json(json_file, output_image="resume_qr.png"):
-#     print(f"Reading data from {json_file}...")
-    
-#     # 1. Load JSON Data
-#     try:
-#         with open(json_file, 'r') as f:
-#             data_dict = json.load(f)
-#     except FileNotFoundError:
-#         print("Error: resume.json file not found.")
-#         return
-
-#     # 2. Convert JSON to Protobuf Object
-#     # ParseDict automatically handles the mapping if keys match the proto schema
-#     try:
-#         resume_proto = resume_pb2.Resume()
-#         ParseDict(data_dict, resume_proto)
-#     except Exception as e:
-#         print(f"Error mapping JSON to Protobuf: {e}")
-#         return
-
-#     # 3. Serialize & Compress
-#     binary_data = resume_proto.SerializeToString()
-#     compressed_data = zlib.compress(binary_data)
-#     final_payload = base64.b64encode(compressed_data).decode('utf-8')
-
-#     # Stats
-#     original_size = len(str(data_dict))
-#     proto_size = len(binary_data)
-#     compressed_size = len(final_payload)
-    
-#     print(f"🔸 Original JSON size: {original_size} bytes")
-#     print(f"🔸 Binary Protobuf size: {proto_size} bytes")
-#     print(f"🔸 Final QR Payload size: {compressed_size} bytes")
-#     print(f"🔻 Compression Ratio: {round((1 - compressed_size/original_size)*100, 1)}% reduction")
-
-#     # 4. Generate QR Code
-#     qr = qrcode.QRCode(
-#         version=None, # Auto-size
-#         error_correction=qrcode.constants.ERROR_CORRECT_M,
-#         box_size=10,
-#         border=4,
-#     )
-#     qr.add_data(final_payload)
-#     qr.make(fit=True)
-
-#     img = qr.make_image(fill_color="black", back_color="white")
-#     img.save(output_image)
-#     print(f"Success! QR Code saved as '{output_image}'")
-
-# if __name__ == "__main__":
-#     generate_qr_from_json("resume.json", "Hasan_Resume_QR.png")
-
-
-
-
 
 # fuck its new 
 
@@ -74,7 +12,7 @@ from google.protobuf.json_format import ParseDict
 import resume_pb2 
 
 # --- CONFIGURATION ---
-CHUNK_SIZE = 800  # Bytes per QR code
+FIXED_GRID_COUNT = 9  # Force exactly 9 QR codes (3x3)
 
 def normalize_data(data):
     """Ensures data types match Protobuf schema."""
@@ -115,19 +53,28 @@ def generate_grid_qr(json_file, output_image="Resume_Grid_QR.png"):
         print(f"Data processing error: {e}")
         return
 
-    # 2. Split into Chunks
+    # 2. Split into EXACTLY 9 Chunks
     total_len = len(full_payload)
-    num_chunks = math.ceil(total_len / CHUNK_SIZE)
+    # Calculate how many bytes per QR to fill exactly 9 spots
+    chunk_size = math.ceil(total_len / FIXED_GRID_COUNT)
     
     print(f"🔸 Total Data Size: {total_len} bytes")
-    print(f"🔸 Splitting into {num_chunks} QR codes")
+    print(f"🔸 Forcing 3x3 Grid (9 QRs)")
+    print(f"🔸 Data per QR: ~{chunk_size} bytes (Very high readability)")
 
     chunks = []
-    for i in range(num_chunks):
-        start = i * CHUNK_SIZE
-        end = start + CHUNK_SIZE
-        header = f"{i+1}/{num_chunks}|" 
-        chunk_data = header + full_payload[start:end]
+    for i in range(FIXED_GRID_COUNT):
+        start = i * chunk_size
+        end = start + chunk_size
+        
+        # Safety check for last chunk
+        if start >= total_len:
+            payload_part = "" # Should not happen with math.ceil, but safe to handle
+        else:
+            payload_part = full_payload[start:end]
+
+        header = f"{i+1}/{FIXED_GRID_COUNT}|" 
+        chunk_data = header + payload_part
         chunks.append(chunk_data)
 
     # 3. Generate Individual QR Images
@@ -140,37 +87,34 @@ def generate_grid_qr(json_file, output_image="Resume_Grid_QR.png"):
         )
         qr.add_data(chunk)
         qr.make(fit=True)
-        
-        # FIX: Add .convert('RGB') to ensure compatibility with the background
+        # Convert to RGB to ensure Pillow compatibility
         img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
         qr_images.append(img)
 
-    # 4. Create the Grid Image
-    grid_size = math.ceil(math.sqrt(num_chunks))
+    # 4. Create the 3x3 Grid Image
+    grid_side = 3 # 3x3
     qr_w, qr_h = qr_images[0].size
     
     padding = 20 
-    final_w = (qr_w * grid_size) + (padding * (grid_size + 1))
-    final_h = (qr_h * grid_size) + (padding * (grid_size + 1))
+    final_w = (qr_w * grid_side) + (padding * (grid_side + 1))
+    final_h = (qr_h * grid_side) + (padding * (grid_side + 1))
     
-    # White Background
     bg_color = (255, 255, 255)
     grid_img = Image.new('RGB', (final_w, final_h), bg_color)
     
-    print(f"🔹 Assembling {grid_size}x{grid_size} grid...")
+    print(f"🔹 Assembling 3x3 grid...")
 
     for idx, img in enumerate(qr_images):
-        row = idx // grid_size
-        col = idx % grid_size
+        row = idx // grid_side
+        col = idx % grid_side
         x = padding + col * (qr_w + padding)
         y = padding + row * (qr_h + padding)
         
-        # Paste works now because img is explicitly RGB
         grid_img.paste(img, (x, y))
 
     # 5. Save
     grid_img.save(output_image)
-    print(f"Success! Saved grid image to: {output_image}")
+    print(f"Success! Saved 3x3 Grid QR to: {output_image}")
 
 if __name__ == "__main__":
     generate_grid_qr("resume_parsed_V2.json", "Hasan_Resume_Grid_QR.png")
